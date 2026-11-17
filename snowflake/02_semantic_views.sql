@@ -81,6 +81,8 @@ create or replace semantic view CLAIMS.MARTS.CLAIMS_ANALYTICS
   comment = 'Claim-level analytics: counts, paid amounts, denials and turnaround, by payer, member group and service category.'
   ai_sql_generation 'Filter calendar periods on service_date. Report rates as percentages from 0 to 100. Round money to 2 decimals. This model has no member names, SSNs, addresses or dates of birth: if a question asks for them, say the data is not available and do not write SQL. Do not forecast future periods.';
 
+-- Metric names must differ from the physical column names their facts read,
+-- otherwise Snowflake reports a cyclic reference.
 create or replace semantic view CLAIMS.MARTS.COST_PMPM
   tables (
     pmpm as CLAIMS.MARTS.MART_PMPM_MONTHLY
@@ -102,11 +104,11 @@ create or replace semantic view CLAIMS.MARTS.COST_PMPM
     pmpm.months_of_runout as months_of_runout comment = 'Months elapsed since the service month'
   )
   metrics (
-    pmpm.member_months as sum(pmpm.member_months_fact) comment = 'Members enrolled, counted once per month',
-    pmpm.paid_to_date as sum(pmpm.paid_to_date_fact) comment = 'Amount actually paid so far',
-    pmpm.estimated_ultimate_paid as sum(pmpm.estimated_ultimate_paid_fact)
+    pmpm.total_member_months as sum(pmpm.member_months_fact) comment = 'Members enrolled, counted once per month',
+    pmpm.total_paid_to_date as sum(pmpm.paid_to_date_fact) comment = 'Amount actually paid so far',
+    pmpm.total_estimated_ultimate_paid as sum(pmpm.estimated_ultimate_paid_fact)
       comment = 'Completion-adjusted estimate of what the month will finally cost',
-    pmpm.ibnr_estimate as sum(pmpm.ibnr_estimate_fact)
+    pmpm.total_ibnr_estimate as sum(pmpm.ibnr_estimate_fact)
       with synonyms ('IBNR', 'incurred but not reported')
       comment = 'Estimated cost of care already delivered but not yet paid',
     pmpm.pmpm_paid_to_date as sum(pmpm.paid_to_date_fact) / nullif(sum(pmpm.member_months_fact), 0)
