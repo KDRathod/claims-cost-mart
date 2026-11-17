@@ -1,0 +1,69 @@
+name: AI eval
+
+# Scores the natural-language layer (Cortex Analyst over the semantic views)
+# against the golden questions, next to a raw text-to-SQL baseline.
+# Manual and weekly: each run costs Cortex credits, so it is not on every push.
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: "Only run the first N questions (blank = all)"
+        required: false
+  schedule:
+    - cron: "43 12 * * 1"   # Mondays 06:43 US Central
+
+concurrency:
+  group: ai-eval
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  SNOWFLAKE_ACCOUNT: ${{ vars.SNOWFLAKE_ACCOUNT }}
+  SNOWFLAKE_USER: CLAIMS_SVC
+  SNOWFLAKE_ROLE: CLAIMS_TRANSFORMER
+  SNOWFLAKE_WAREHOUSE: CLAIMS_WH
+  SNOWFLAKE_DATABASE: CLAIMS
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write the service key to a temp file
+        env:
+          SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+        run: |
+          umask 077
+          printf '%s\n' "$SNOWFLAKE_PRIVATE_KEY" > "$RUNNER_TEMP/claims_svc.p8"
+          echo "SNOWFLAKE_PRIVATE_KEY_PATH=$RUNNER_TEMP/claims_svc.p8" >> "$GITHUB_ENV"
+
+      - name: Deploy the semantic views
+        working-directory: ai
+        run: python deploy_semantic_views.py
+
+      - name: Run the eval
+        working-directory: ai
+        run: python run_eval.py ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }}
+
+      - name: Upload results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ai-eval-results
+          path: ai/results/
+
+      - name: Remove the key file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/claims_svc.p8"
