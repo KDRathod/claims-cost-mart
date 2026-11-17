@@ -9,6 +9,11 @@ on:
       limit:
         description: "Only run the first N questions (blank = all)"
         required: false
+      systems:
+        description: "Which systems to score"
+        type: choice
+        options: ["governed raw", "governed", "raw"]
+        default: "governed raw"
   schedule:
     - cron: "43 12 * * 1"   # Mondays 06:43 US Central
 
@@ -58,7 +63,7 @@ jobs:
         working-directory: ai
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: python run_eval.py ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }}
+        run: python run_eval.py --systems ${{ inputs.systems || 'governed raw' }} ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }}
 
       - name: Upload results
         if: always()

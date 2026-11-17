@@ -57,3 +57,8 @@ production lesson.
 - **Why:** two separate limits. New accounts are blocked from the legacy `SNOWFLAKE.CORTEX.*` functions (use `AI_COMPLETE`), and trial accounts cannot call `AI_COMPLETE` at all. Cortex Analyst itself is allowed on a trial.
 - **Fix:** the baseline now calls GitHub Models from the workflow, authenticated by the workflow's own token (`permissions: models: read`), so no extra account or key is needed.
 - **Lesson:** check what a free tier actually permits before designing around it, and keep the model behind one small function so the provider can be swapped.
+
+## 11. Eval crashed after the expensive half and lost its results
+- **What happened:** all 30 Cortex Analyst questions ran, then the baseline's first call returned something that was not JSON, the script raised, and nothing had been written to disk. The Analyst answers were paid for and gone.
+- **Fix:** results are saved after each system finishes, the baseline call reports an unreadable response as an error instead of raising, and the workflow can run one system on its own (`systems: raw`) so a cheap part can be debugged without re-running the expensive part.
+- **Lesson:** checkpoint after every costly step. This is the same idea as an idempotent loader: a failure late in a run should not force you to redo, or re-pay for, the work before it.

@@ -119,14 +119,18 @@ def _github_models_call(model: str, prompt: str) -> tuple[str | None, str | None
     for attempt in range(4):
         resp = requests.post(
             GITHUB_MODELS_URL, timeout=90,
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json",
+                     "Accept": "application/vnd.github+json", "X-GitHub-Api-Version": "2022-11-28"},
             json={"model": model, "temperature": 0, "messages": [{"role": "user", "content": prompt}]})
         if resp.status_code == 429:  # free tier is rate limited: wait and retry
             time.sleep(min(int(resp.headers.get("retry-after", 20)), 60))
             continue
         if resp.status_code != 200:
             return None, f"HTTP {resp.status_code}: {resp.text[:200]}"
-        return resp.json()["choices"][0]["message"]["content"], None
+        try:
+            return resp.json()["choices"][0]["message"]["content"], None
+        except Exception as exc:  # noqa: BLE001  (a 200 that is not the JSON we expect)
+            return None, f"unreadable response ({type(exc).__name__}), content-type={resp.headers.get('content-type')}, body starts: {resp.text[:160]!r}"
     return None, "rate limited"
 
 
@@ -205,6 +209,13 @@ def summarise(results: list[dict]) -> dict:
     }
 
 
+def save(report: dict) -> None:
+    """Write results after every system, so a failure later in the run
+    cannot throw away answers that were already paid for."""
+    (HERE / "results").mkdir(exist_ok=True)
+    (HERE / "results" / "latest.json").write_text(json.dumps(report, indent=2, default=str))
+
+
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--systems", nargs="+", default=["governed", "raw"])
@@ -226,6 +237,7 @@ def main() -> None:
             print(f"governed {q['id']} {r['outcome']:<22} {r['seconds']:>5}s  {r['note'][:90]}")
         report["systems"]["governed"] = {"description": "Cortex Analyst over semantic views",
                                          "summary": summarise(results), "results": results}
+        save(report)
 
     if "raw" in args.systems:
         model = pick_raw_model(con)
@@ -243,9 +255,7 @@ def main() -> None:
             report["systems"]["raw"] = {"description": f"{model} given table and column names only",
                                         "summary": summarise(results), "results": results}
     con.close()
-
-    (HERE / "results").mkdir(exist_ok=True)
-    (HERE / "results" / "latest.json").write_text(json.dumps(report, indent=2, default=str))
+    save(report)
 
     lines = ["### Natural-language layer: accuracy on golden questions", "",
              "| System | Correct answers | Exact match | Out-of-scope refused | Outcomes |", "|---|---|---|---|---|"]
