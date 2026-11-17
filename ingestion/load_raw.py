@@ -165,16 +165,14 @@ def load_snowflake(files: list[LandingFile]) -> dict[str, int]:
     con = snowflake.connector.connect(
         account=os.environ["SNOWFLAKE_ACCOUNT"],
         user=os.environ["SNOWFLAKE_USER"],
-        password=os.environ.get("SNOWFLAKE_PASSWORD"),
-        private_key_file=os.environ.get("SNOWFLAKE_PRIVATE_KEY_PATH"),
-        role=os.environ.get("SNOWFLAKE_ROLE", "CLAIMS_LOADER"),
+        private_key_file=os.environ["SNOWFLAKE_PRIVATE_KEY_PATH"],  # key-pair auth, no password
+        role=os.environ.get("SNOWFLAKE_ROLE", "CLAIMS_TRANSFORMER"),
         warehouse=os.environ.get("SNOWFLAKE_WAREHOUSE", "CLAIMS_WH"),
         database=os.environ.get("SNOWFLAKE_DATABASE", "CLAIMS"),
         schema="RAW",
         session_parameters={"QUERY_TAG": "claims-cost-mart:load_raw"},
     )
     cur = con.cursor()
-    cur.execute("create stage if not exists RAW.LANDING file_format = (type = parquet)")
     loaded: dict[str, int] = {}
 
     latest_replace: dict[str, LandingFile] = {}
