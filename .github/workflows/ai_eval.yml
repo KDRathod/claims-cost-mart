@@ -18,6 +18,7 @@ concurrency:
 
 permissions:
   contents: read
+  models: read   # lets the built-in token call GitHub Models for the baseline
 
 env:
   SNOWFLAKE_ACCOUNT: ${{ vars.SNOWFLAKE_ACCOUNT }}
@@ -55,6 +56,8 @@ jobs:
 
       - name: Run the eval
         working-directory: ai
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: python run_eval.py ${{ inputs.limit && format('--limit {0}', inputs.limit) || '' }}
 
       - name: Upload results

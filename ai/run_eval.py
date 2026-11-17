@@ -3,8 +3,10 @@
 Two systems answer every question:
 
   governed   Cortex Analyst, restricted to the semantic views
-  raw        a general LLM given only the table and column names (what
-             "just point an LLM at the warehouse" looks like)
+  raw        a general LLM (via GitHub Models) given only the table and
+             column names: what "just point an LLM at the warehouse" looks
+             like. Different model and no semantic layer, so this is a
+             realistic baseline, not a controlled ablation.
 
 Scoring is by EXECUTION: run the model's SQL and the hand-written SQL, then
 compare the result sets. Column order, row order and column names are
@@ -27,6 +29,8 @@ import json
 import os
 import re
 import time
+
+import requests
 from decimal import Decimal
 from pathlib import Path
 
@@ -38,8 +42,10 @@ HERE = Path(__file__).resolve().parent
 MARTS = "CLAIMS.MARTS"
 SEMANTIC_VIEWS = [f"{MARTS}.CLAIMS_ANALYTICS", f"{MARTS}.COST_PMPM"]
 RAW_TABLES = ["FCT_CLAIMS", "DIM_PAYER", "DIM_MEMBER", "MART_PMPM_MONTHLY"]
+# The baseline runs on GitHub Models because Snowflake blocks AI_COMPLETE on
+# trial accounts. It is a general LLM that sees table and column names only.
 RAW_MODEL_CANDIDATES = os.environ.get(
-    "RAW_BASELINE_MODELS", "claude-sonnet-4-5,claude-4-sonnet,llama3.3-70b,mistral-large2").split(",")
+    "RAW_BASELINE_MODELS", "openai/gpt-4.1-mini,openai/gpt-4o-mini,openai/gpt-4.1").split(",")
 RESTRICTED_WORDS = re.compile(r"\b(ssn|first_name|last_name|street_address|birth_date|dim_member_pii|restricted)\b", re.I)
 
 
@@ -101,9 +107,32 @@ def schema_prompt(con) -> str:
     return "\n".join(f"{MARTS}.{t} ({cols})" for t, cols in cur.fetchall())
 
 
+GITHUB_MODELS_URL = "https://models.github.ai/inference/chat/completions"
+
+
+def _github_models_call(model: str, prompt: str) -> tuple[str | None, str | None]:
+    """One chat completion on GitHub Models (free, authenticated by the
+    workflow's own GITHUB_TOKEN with `models: read`). Returns (text, error)."""
+    token = os.environ.get("GITHUB_TOKEN")
+    if not token:
+        return None, "no GITHUB_TOKEN"
+    for attempt in range(4):
+        resp = requests.post(
+            GITHUB_MODELS_URL, timeout=90,
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+            json={"model": model, "temperature": 0, "messages": [{"role": "user", "content": prompt}]})
+        if resp.status_code == 429:  # free tier is rate limited: wait and retry
+            time.sleep(min(int(resp.headers.get("retry-after", 20)), 60))
+            continue
+        if resp.status_code != 200:
+            return None, f"HTTP {resp.status_code}: {resp.text[:200]}"
+        return resp.json()["choices"][0]["message"]["content"], None
+    return None, "rate limited"
+
+
 def pick_raw_model(con) -> str | None:
     for model in RAW_MODEL_CANDIDATES:
-        _, err = run_sql(con, f"select snowflake.cortex.complete('{model.strip()}', 'Reply with the single word ok')")
+        _, err = _github_models_call(model.strip(), "Reply with the single word ok")
         if err is None:
             return model.strip()
         print(f"  baseline model {model} unavailable: {err[:120]}")
@@ -113,16 +142,13 @@ def pick_raw_model(con) -> str | None:
 def ask_raw(con, model: str, schema: str, question: str) -> dict:
     prompt = (
         "You write Snowflake SQL. Use only these tables:\n" + schema +
-        "\n\nWrite one SQL query that answers the question. Return only the SQL, no explanation."
+        "\n\nWrite one SQL query that answers the question. Return only the SQL, no explanation. "
+        "If the question cannot be answered from these tables, reply with the single word CANNOT."
         "\n\nQuestion: " + question)
-    cur = con.cursor()
-    try:
-        cur.execute("select snowflake.cortex.complete(%s, %s)", (model, prompt))
-        text = cur.fetchone()[0] or ""
-    except Exception as exc:  # noqa: BLE001
-        return {"sql": None, "text": None, "error": f"{type(exc).__name__}: {str(exc)[:300]}"}
-    finally:
-        cur.close()
+    time.sleep(4.5)  # stay under the free tier's requests-per-minute limit
+    text, err = _github_models_call(model, prompt)
+    if err:
+        return {"sql": None, "text": None, "error": err}
     match = re.search(r"```(?:sql)?\s*(.+?)```", text, re.S | re.I)
     sql = (match.group(1) if match else text).strip()
     if not re.match(r"(?is)^\s*(with|select)\b", sql):

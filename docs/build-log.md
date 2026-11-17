@@ -41,3 +41,19 @@ production lesson.
 - **Why:** in a multi-column `ADD COLUMN`, Snowflake applies `IF NOT EXISTS` to the first column only. On the second run the first column was skipped and the second raised an error.
 - **Fix:** one `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` statement per column.
 - **Lesson:** "runs once" is not "idempotent". The bug only appears on the second run, which is why the loader is always tested by running it twice.
+
+## 8. Semantic view: `invalid identifier 'PROVIDER_NETWORK_STATUS'`
+- **What happened:** `CREATE SEMANTIC VIEW` failed on one dimension.
+- **Why:** the syntax is `table.new_name AS expression`, the reverse of a normal SQL alias (`expression AS name`). I wrote it the SQL way round, so Snowflake looked for a column named after my alias.
+- **Fix:** `claims.provider_network_status AS provider_network_status_at_service`.
+
+## 9. Semantic view: `Cyclic reference of expressions is not allowed`
+- **What happened:** a metric called `estimated_ultimate_paid` was built on a fact that read the column `estimated_ultimate_paid`.
+- **Why:** inside a semantic view, a name resolves to the semantic object first. The fact's expression pointed at the metric, which pointed back at the fact.
+- **Fix:** metric names differ from the physical column names (`total_estimated_ultimate_paid`).
+
+## 10. `SNOWFLAKE.CORTEX.COMPLETE is not available on this account` then `AI function ... is not available for trial accounts`
+- **What happened:** the raw text-to-SQL baseline could not call an LLM inside Snowflake.
+- **Why:** two separate limits. New accounts are blocked from the legacy `SNOWFLAKE.CORTEX.*` functions (use `AI_COMPLETE`), and trial accounts cannot call `AI_COMPLETE` at all. Cortex Analyst itself is allowed on a trial.
+- **Fix:** the baseline now calls GitHub Models from the workflow, authenticated by the workflow's own token (`permissions: models: read`), so no extra account or key is needed.
+- **Lesson:** check what a free tier actually permits before designing around it, and keep the model behind one small function so the provider can be swapped.
