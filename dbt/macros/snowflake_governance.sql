@@ -17,8 +17,18 @@
 {%- endmacro %}
 
 {% macro apply_row_access_policy(column, policy='PAYER_ROW_ACCESS') -%}
-    {%- if target.type == 'snowflake' -%}
-        alter table {{ this }} add row access policy {{ target.database }}.GOVERNANCE.{{ policy }} on ({{ column }})
+    {#- Adding a policy to a table that already has one is an error, and an
+        incremental model keeps its table between runs. Check first. -#}
+    {%- if target.type == 'snowflake' and execute -%}
+        {%- set existing = run_query(
+            "select count(*) from table(" ~ target.database ~ ".information_schema.policy_references("
+            ~ "ref_entity_name => '" ~ this.database ~ "." ~ this.schema ~ "." ~ this.identifier ~ "', "
+            ~ "ref_entity_domain => 'table')) where policy_kind = 'ROW_ACCESS_POLICY'") -%}
+        {%- if existing.columns[0].values()[0] == 0 -%}
+            alter table {{ this }} add row access policy {{ target.database }}.GOVERNANCE.{{ policy }} on ({{ column }})
+        {%- else -%}
+            select 1
+        {%- endif -%}
     {%- else -%}
         select 1
     {%- endif -%}

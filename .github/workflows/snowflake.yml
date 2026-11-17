@@ -1,0 +1,89 @@
+name: Snowflake pipeline
+
+# Production path. Loads the feed into Snowflake and runs dbt there.
+#   daily     load whatever is new, then dbt build (scheduled)
+#   backfill  replay history at a few checkpoints so the provider snapshot
+#             captures each version, then catch up to today (run once)
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: "daily or backfill"
+        type: choice
+        options: [daily, backfill]
+        default: daily
+  schedule:
+    - cron: "17 11 * * *"   # 05:17 US Central, off the top of the hour on purpose
+
+concurrency:
+  group: snowflake-pipeline   # never two loads at once
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  DBT_TARGET: snowflake
+  DBT_PROFILES_DIR: ${{ github.workspace }}/dbt
+  SNOWFLAKE_ACCOUNT: ${{ vars.SNOWFLAKE_ACCOUNT }}
+  SNOWFLAKE_USER: CLAIMS_SVC
+  SNOWFLAKE_ROLE: CLAIMS_TRANSFORMER
+  SNOWFLAKE_WAREHOUSE: CLAIMS_WH
+  SNOWFLAKE_DATABASE: CLAIMS
+  APPLY_GOVERNANCE: "true"
+
+jobs:
+  pipeline:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Write the service key to a temp file
+        env:
+          SNOWFLAKE_PRIVATE_KEY: ${{ secrets.SNOWFLAKE_PRIVATE_KEY }}
+        run: |
+          umask 077
+          printf '%s\n' "$SNOWFLAKE_PRIVATE_KEY" > "$RUNNER_TEMP/claims_svc.p8"
+          echo "SNOWFLAKE_PRIVATE_KEY_PATH=$RUNNER_TEMP/claims_svc.p8" >> "$GITHUB_ENV"
+
+      - name: Check the Snowflake login
+        run: python scripts/snowflake_check.py
+
+      - name: Generate the feed up to today
+        run: |
+          echo "FEED_AS_OF_DATE=$(date -u +%F)" >> "$GITHUB_ENV"
+          FEED_AS_OF_DATE=$(date -u +%F) python generator/simulate_adjudication.py
+
+      - name: Backfill history at snapshot checkpoints
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'backfill'
+        run: |
+          cd dbt && dbt deps && cd ..
+          for d in 2023-01-31 2024-07-31 2026-01-31; do
+            echo "::group::load and build through $d"
+            python ingestion/load_raw.py --target snowflake --through-date "$d"
+            (cd dbt && dbt build)
+            echo "::endgroup::"
+          done
+
+      - name: Load new files
+        run: python ingestion/load_raw.py --target snowflake
+
+      - name: dbt build
+        working-directory: dbt
+        run: |
+          dbt deps
+          dbt source freshness
+          dbt build
+
+      - name: Remove the key file
+        if: always()
+        run: rm -f "$RUNNER_TEMP/claims_svc.p8"

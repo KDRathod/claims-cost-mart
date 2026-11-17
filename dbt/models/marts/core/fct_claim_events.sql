@@ -3,8 +3,7 @@
         materialized='incremental',
         unique_key='event_id',
         incremental_strategy='merge',
-        on_schema_change='append_new_columns',
-        cluster_by=['posted_date']
+        on_schema_change='append_new_columns'
     )
 }}
 

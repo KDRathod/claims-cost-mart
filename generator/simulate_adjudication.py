@@ -18,8 +18,8 @@ Output (the "landing zone")
     landing/members/       full member extract
     landing/enrollment/    full enrollment extract
 
-History is delivered as one file per month. The last DAILY_DAYS days are
-delivered as one file per day, the way a production feed would arrive.
+History is delivered as one file per month. From DAILY_START onward the
+feed arrives as one file per day, the way a production feed would.
 
 Deliberate data problems (so the pipeline has something real to handle)
 -----------------------------------------------------------------------
@@ -33,6 +33,7 @@ Usage:
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import uuid
 from datetime import date, timedelta
@@ -45,8 +46,12 @@ import pyarrow.compute  # noqa: F401  (registers pa.compute)
 import pyarrow.parquet as pq
 
 SEED = 42
-AS_OF_DATE = date(2026, 10, 31)      # nothing posted after this date exists yet
-DAILY_DAYS = 61                      # last N days arrive as daily files
+# "Today" for the simulated feed: nothing posted after this date exists yet.
+# Pinned by default so tests are reproducible. The scheduled production run
+# sets FEED_AS_OF_DATE to the real date, so each day one more daily file of
+# late adjustments and reversals shows up, exactly like a live feed.
+AS_OF_DATE = date.fromisoformat(os.environ.get("FEED_AS_OF_DATE", "2026-10-31"))
+DAILY_START = date(2026, 9, 1)       # history before this is monthly files, after it daily files
 SCHEMA_CHANGE_DATE = date(2025, 7, 1)
 REDELIVERY_DATES = [date(2026, 9, 9), date(2026, 9, 23), date(2026, 10, 14)]
 PROVIDER_EXTRACT_DATES = [date(2023, 1, 1), date(2024, 7, 1), date(2026, 1, 1)]
@@ -222,9 +227,9 @@ def simulate(source: Path) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
 
 
 def _write_partitions(df: pd.DataFrame, date_col: str, out_dir: Path, stem: str) -> int:
-    """History as monthly files, the last DAILY_DAYS days as daily files."""
+    """History as monthly files, everything from DAILY_START as daily files."""
     out_dir.mkdir(parents=True, exist_ok=True)
-    daily_start = AS_OF_DATE - timedelta(days=DAILY_DAYS - 1)
+    daily_start = DAILY_START
     d = pd.to_datetime(df[date_col])
     files = 0
     hist = df[d.dt.date < daily_start]
@@ -249,7 +254,7 @@ def write_landing(source: Path, out: Path) -> dict[str, int]:
         pd.to_datetime(events["posted_date"]).dt.date >= date(2026, 3, 1), "NEXTGEN", "CORE")
     ev_dir = out / "claim_events"
     ev_dir.mkdir(parents=True)
-    daily_start = AS_OF_DATE - timedelta(days=DAILY_DAYS - 1)
+    daily_start = DAILY_START
     files = 0
     for key, part in events.groupby(
         np.where(pd.to_datetime(events["posted_date"]).dt.date < daily_start,

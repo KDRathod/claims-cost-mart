@@ -26,6 +26,8 @@ import calendar
 import hashlib
 import os
 import re
+import shutil
+import tempfile
 from dataclasses import dataclass
 from datetime import date, datetime, timezone
 from pathlib import Path
@@ -188,11 +190,15 @@ def load_snowflake(files: list[LandingFile]) -> dict[str, int]:
             todo = [latest_replace[dataset]] if dataset in latest_replace else []
         if not todo:
             continue
-        for f in todo:
-            # PUT skips files already staged with the same digest (OVERWRITE = FALSE)
+        # One PUT per dataset: copy the selected files to a scratch folder and
+        # upload them together (parallel). PUT skips files that are already
+        # staged with the same checksum.
+        with tempfile.TemporaryDirectory() as tmp:
+            for f in todo:
+                shutil.copy(f.path, Path(tmp) / f.path.name)
             cur.execute(
-                f"put 'file://{f.path.resolve().as_posix()}' @RAW.LANDING/{dataset}/ "
-                "auto_compress = false overwrite = false parallel = 8"
+                f"put 'file://{Path(tmp).resolve().as_posix()}/*.parquet' @RAW.LANDING/{dataset}/ "
+                "auto_compress = false overwrite = false parallel = 16"
             )
         table = f"RAW.{dataset.upper()}"
         pattern = "|".join(re.escape(f.path.name) for f in todo)
@@ -200,7 +206,8 @@ def load_snowflake(files: list[LandingFile]) -> dict[str, int]:
             f"""create table if not exists {table}
                 using template (
                     select array_agg(object_construct(*))
-                    from table(infer_schema(location => '@RAW.LANDING/{dataset}/', file_format => 'RAW.PARQUET_FF')))
+                    from table(infer_schema(location => '@RAW.LANDING/{dataset}/', file_format => 'RAW.PARQUET_FF',
+                                            ignore_case => true)))
                 enable_schema_evolution = true"""
         )
         cur.execute(f"alter table {table} add column if not exists _SOURCE_FILE varchar, _LOADED_AT timestamp_tz")

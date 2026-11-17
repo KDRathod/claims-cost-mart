@@ -4,7 +4,6 @@
         unique_key='claim_id',
         incremental_strategy='merge',
         on_schema_change='append_new_columns',
-        cluster_by=['service_month'],
         post_hook="{{ apply_row_access_policy('payer_id') }}" if target.type == 'snowflake' and env_var('APPLY_GOVERNANCE', 'false') == 'true' else ''
     )
 }}
