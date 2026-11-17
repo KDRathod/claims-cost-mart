@@ -1,0 +1,131 @@
+version: 2
+
+models:
+  - name: fct_claim_events
+    description: >
+      Deduplicated, append-only claim ledger. One row per financial event.
+      Amounts are deltas, so any total is a simple sum.
+    config:
+      contract: {enforced: false}
+    columns:
+      - name: event_id
+        description: Stable id of the event. Redelivered copies share it.
+        data_tests: [unique, not_null]
+      - name: claim_id
+        data_tests: [not_null]
+      - name: lag_months
+        description: Whole months between the service month and the month the event was posted.
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+              config: {where: "not is_orphan_event"}
+      - name: is_orphan_event
+        description: True when the event's claim header has not arrived yet.
+        data_tests:
+          - accepted_values:
+              arguments: {values: [false]}
+              config: {severity: warn}
+
+  - name: fct_claims
+    description: One row per claim with its current financial state, rebuilt whenever a new event arrives.
+    columns:
+      - name: claim_id
+        data_tests: [unique, not_null]
+      - name: claim_status
+        data_tests:
+          - not_null
+          - accepted_values:
+              arguments: {values: [pending, paid, denied, reversed]}
+      - name: paid_amount
+        description: Net amount paid by the plan to date, after adjustments and reversals.
+      - name: provider_network_status_at_service
+        description: Provider network status on the service date (point-in-time join to dim_provider).
+        data_tests:
+          - accepted_values:
+              arguments: {values: [in_network, out_of_network, unknown]}
+      - name: member_id
+        data_tests:
+          - relationships:
+              arguments: {to: ref('dim_member'), field: member_id}
+      - name: payer_id
+        data_tests:
+          - relationships:
+              arguments: {to: ref('dim_payer'), field: payer_id}
+
+  - name: dim_provider
+    description: Type 2 provider dimension from the snapshot.
+    data_tests:
+      - dbt_utils.unique_combination_of_columns:
+          arguments: {combination_of_columns: [provider_id, valid_from]}
+    columns:
+      - name: provider_key
+        data_tests: [unique, not_null]
+      - name: provider_id
+        data_tests: [not_null]
+
+  - name: dim_payer
+    description: Payer dimension.
+    columns:
+      - name: payer_id
+        data_tests: [unique, not_null]
+
+  - name: dim_member
+    description: De-identified member dimension. No direct identifiers.
+    columns:
+      - name: member_id
+        data_tests: [unique, not_null]
+      - name: zip3
+        description: First 3 digits of ZIP only.
+      - name: age_band
+        data_tests:
+          - accepted_values:
+              arguments: {values: ['0-17', '18-34', '35-49', '50-64', '65+']}
+
+  - name: fct_member_months
+    description: One row per member, payer and covered month. Denominator for PMPM.
+    columns:
+      - name: member_month_id
+        data_tests: [unique, not_null]
+
+  - name: mart_claims_triangle
+    description: Claims run-out triangle. What was known about each service month after N months.
+    columns:
+      - name: triangle_cell_id
+        data_tests: [unique, not_null]
+
+  - name: mart_completion_factors
+    description: Share of final cost usually paid after N months, by service category, from mature months only.
+    columns:
+      - name: completion_factor_id
+        data_tests: [unique, not_null]
+      - name: completion_factor
+        data_tests:
+          - not_null
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0, max_value: 1.25}
+
+  - name: mart_cost_by_category_monthly
+    description: Paid to date and completion-adjusted estimate by service month, payer and service category.
+    columns:
+      - name: cost_month_id
+        data_tests: [unique, not_null]
+      - name: estimate_reliability
+        data_tests:
+          - accepted_values:
+              arguments: {values: [final, high, medium, low]}
+
+  - name: mart_pmpm_monthly
+    description: Per member per month cost by payer, paid-to-date and completion-adjusted.
+    columns:
+      - name: pmpm_month_id
+        data_tests: [unique, not_null]
+      - name: member_months
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 1}
+
+  - name: dim_member_pii
+    description: Direct identifiers. Restricted schema, masked on Snowflake.
+    columns:
+      - name: member_id
+        data_tests: [unique, not_null]

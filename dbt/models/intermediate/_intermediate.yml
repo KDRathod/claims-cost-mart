@@ -1,0 +1,37 @@
+version: 2
+
+models:
+  - name: int_claim_state
+    description: Current state of every claim rebuilt from the full ledger. Reference implementation for fct_claims.
+    columns:
+      - name: claim_id
+        data_tests: [unique, not_null]
+  - name: int_member_months
+    description: Member x payer x month coverage grid.
+
+unit_tests:
+  - name: claim_status_follows_latest_decision
+    description: >
+      A paid claim that is later reversed is 'reversed'; a denied claim that
+      wins on appeal is 'paid'; a claim with only a submission is 'pending'.
+      Amounts are the sum of deltas.
+    model: int_claim_state
+    given:
+      - input: ref('fct_claim_events')
+        rows:
+          - {claim_id: A, event_type: SUBMITTED, event_at: "2026-01-01 09:00:00", posted_date: "2026-01-01", paid_amount_delta: 0, allowed_amount_delta: 0, member_responsibility_delta: 0, reason_code: null, _loaded_at: "2026-01-02"}
+          - {claim_id: A, event_type: PAID,      event_at: "2026-01-10 09:00:00", posted_date: "2026-01-10", paid_amount_delta: 80, allowed_amount_delta: 100, member_responsibility_delta: 20, reason_code: null, _loaded_at: "2026-01-11"}
+          - {claim_id: A, event_type: REVERSED,  event_at: "2026-03-01 09:00:00", posted_date: "2026-03-01", paid_amount_delta: -80, allowed_amount_delta: -100, member_responsibility_delta: -20, reason_code: REVERSAL, _loaded_at: "2026-03-02"}
+          - {claim_id: B, event_type: SUBMITTED, event_at: "2026-01-01 09:00:00", posted_date: "2026-01-01", paid_amount_delta: 0, allowed_amount_delta: 0, member_responsibility_delta: 0, reason_code: null, _loaded_at: "2026-01-02"}
+          - {claim_id: B, event_type: DENIED,    event_at: "2026-01-12 09:00:00", posted_date: "2026-01-12", paid_amount_delta: 0, allowed_amount_delta: 0, member_responsibility_delta: 0, reason_code: CO-16, _loaded_at: "2026-01-13"}
+          - {claim_id: B, event_type: PAID,      event_at: "2026-02-20 09:00:00", posted_date: "2026-02-20", paid_amount_delta: 45, allowed_amount_delta: 50, member_responsibility_delta: 5, reason_code: APPEAL, _loaded_at: "2026-02-21"}
+          - {claim_id: C, event_type: SUBMITTED, event_at: "2026-01-01 09:00:00", posted_date: "2026-01-01", paid_amount_delta: 0, allowed_amount_delta: 0, member_responsibility_delta: 0, reason_code: null, _loaded_at: "2026-01-02"}
+          - {claim_id: D, event_type: PAID,      event_at: "2026-01-10 09:00:00", posted_date: "2026-01-10", paid_amount_delta: 80, allowed_amount_delta: 100, member_responsibility_delta: 20, reason_code: null, _loaded_at: "2026-01-11"}
+          - {claim_id: D, event_type: ADJUSTED,  event_at: "2026-02-15 09:00:00", posted_date: "2026-02-15", paid_amount_delta: -16, allowed_amount_delta: -20, member_responsibility_delta: -4, reason_code: AUDIT, _loaded_at: "2026-02-16"}
+    expect:
+      # every expected row lists the same columns (dbt unions the rows)
+      rows:
+        - {claim_id: A, claim_status: reversed, paid_amount: 0,  was_reversed: true,  was_ever_denied: false, was_adjusted: false, was_overturned_on_appeal: false, denial_reason_code: null}
+        - {claim_id: B, claim_status: paid,     paid_amount: 45, was_reversed: false, was_ever_denied: true,  was_adjusted: false, was_overturned_on_appeal: true,  denial_reason_code: CO-16}
+        - {claim_id: C, claim_status: pending,  paid_amount: 0,  was_reversed: false, was_ever_denied: false, was_adjusted: false, was_overturned_on_appeal: false, denial_reason_code: null}
+        - {claim_id: D, claim_status: paid,     paid_amount: 64, was_reversed: false, was_ever_denied: false, was_adjusted: true,  was_overturned_on_appeal: false, denial_reason_code: null}
