@@ -114,6 +114,20 @@ models:
           - accepted_values:
               arguments: {values: [final, high, medium, low]}
 
+  - name: mart_ibnr_backtest
+    description: >
+      Out-of-sample backtest of the completion-factor estimate. For each mature
+      service month, the estimate that would have been made after 0 to 5 months
+      of run-out (using only factors known at that time) next to the real
+      final cost.
+    columns:
+      - name: backtest_id
+        data_tests: [unique, not_null]
+      - name: naive_error_pct
+        description: (paid to date then - final cost) / final cost. Negative means understated.
+      - name: estimate_error_pct
+        description: (completion-adjusted estimate then - final cost) / final cost.
+
   - name: mart_pmpm_monthly
     description: Per member per month cost by payer, paid-to-date and completion-adjusted.
     columns:
