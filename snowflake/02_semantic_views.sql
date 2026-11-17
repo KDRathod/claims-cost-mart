@@ -48,7 +48,7 @@ create or replace semantic view CLAIMS.MARTS.CLAIMS_ANALYTICS
     claims.claim_status as claim_status
       comment = 'Current status: pending (no decision yet), paid, denied, reversed',
     claims.denial_reason_code as denial_reason_code comment = 'Reason code of the denial, for claims that were ever denied',
-    claims.provider_network_status_at_service as provider_network_status
+    claims.provider_network_status as provider_network_status_at_service
       with synonyms ('network status')
       comment = 'in_network or out_of_network on the service date',
     claims.was_ever_denied as was_ever_denied comment = 'True if the claim was denied at any point, even if later paid',
