@@ -1,0 +1,28 @@
+# secrets and local config
+.env
+*.p8
+profiles.local.yml
+
+# generated data (rebuilt by `make data`)
+data/landing/
+data/*.duckdb
+data/*.duckdb.wal
+
+# python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+
+# dbt
+dbt/target/
+dbt/dbt_packages/
+dbt/logs/
+logs/
+
+# airflow
+airflow/logs/
+airflow/airflow.db
+airflow/airflow.cfg
+
+.DS_Store
