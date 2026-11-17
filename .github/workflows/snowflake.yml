@@ -21,6 +21,7 @@ concurrency:
 
 permissions:
   contents: read
+  issues: write   # a failed run opens an issue (the alert)
 
 env:
   DBT_TARGET: snowflake
@@ -44,8 +45,22 @@ jobs:
           python-version: "3.12"
           cache: pip
 
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+      - name: Install pipeline dependencies
+        run: |
+          pip install -r requirements.txt
+          echo "PIPELINE_PYTHON=$(which python)" >> "$GITHUB_ENV"
+          echo "PIPELINE_DBT=$(which dbt)" >> "$GITHUB_ENV"
+
+      # Airflow gets its own virtualenv: its pinned dependencies conflict
+      # with dbt's, which is also how most production setups are laid out.
+      - name: Install Airflow (separate virtualenv)
+        run: |
+          python -m venv "$RUNNER_TEMP/airflow-venv"
+          "$RUNNER_TEMP/airflow-venv/bin/pip" install -q "apache-airflow==3.4.0" \
+            --constraint "https://raw.githubusercontent.com/apache/airflow/constraints-3.4.0/constraints-3.12.txt"
+          echo "AIRFLOW_HOME=$RUNNER_TEMP/airflow-home" >> "$GITHUB_ENV"
+          echo "AIRFLOW__CORE__DAGS_FOLDER=$GITHUB_WORKSPACE/airflow/dags" >> "$GITHUB_ENV"
+          echo "AIRFLOW__CORE__LOAD_EXAMPLES=false" >> "$GITHUB_ENV"
 
       - name: Write the service key to a temp file
         env:
@@ -58,15 +73,11 @@ jobs:
       - name: Check the Snowflake login
         run: python scripts/snowflake_check.py
 
-      - name: Generate the feed up to today
-        run: |
-          echo "FEED_AS_OF_DATE=$(date -u +%F)" >> "$GITHUB_ENV"
-          FEED_AS_OF_DATE=$(date -u +%F) python generator/simulate_adjudication.py
-
       - name: Backfill history at snapshot checkpoints
         if: github.event_name == 'workflow_dispatch' && inputs.mode == 'backfill'
         run: |
-          cd dbt && dbt deps && cd ..
+          FEED_AS_OF_DATE=$(date -u +%F) python generator/simulate_adjudication.py
+          (cd dbt && dbt deps)
           for d in 2023-01-31 2024-07-31 2026-01-31; do
             echo "::group::load and build through $d"
             python ingestion/load_raw.py --target snowflake --through-date "$d"
@@ -74,15 +85,20 @@ jobs:
             echo "::endgroup::"
           done
 
-      - name: Load new files
-        run: python ingestion/load_raw.py --target snowflake
-
-      - name: dbt build
-        working-directory: dbt
+      - name: Run the claims_daily DAG for today
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          dbt deps
-          dbt source freshness
-          dbt build
+          "$RUNNER_TEMP/airflow-venv/bin/airflow" db migrate > /dev/null 2>&1
+          "$RUNNER_TEMP/airflow-venv/bin/airflow" dags test claims_daily "$(date -u +%F)"
+
+      # Belt and braces: if the run died before Airflow's own failure
+      # callback could fire (for example the install step), still alert.
+      - name: Alert on failure
+        if: failure()
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/alert.py --task workflow --run-date "$(date -u +%F)" --message "Workflow failed outside a DAG task. See the run log."
 
       - name: Remove the key file
         if: always()

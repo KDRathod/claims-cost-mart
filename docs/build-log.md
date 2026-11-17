@@ -35,3 +35,9 @@ production lesson.
 - **How it was found:** secrets cannot be read back, so the login check now parses the key file first and prints two safe facts: how many lines it has and whether the first line is a key header. It also prints the public-key fingerprint, which can be compared to `RSA_PUBLIC_KEY_FP` in `DESC USER`.
 - **Fix:** paste the whole `.p8` file into the secret again, BEGIN and END lines included.
 - **Lesson:** fail fast and say why. A pipeline should check its own credentials before doing work, and diagnose them without ever printing the secret.
+
+## 7. `column '_LOADED_AT' already exists` on the second Snowflake load
+- **What happened:** the first load worked, the second failed on `ALTER TABLE ... ADD COLUMN IF NOT EXISTS _SOURCE_FILE varchar, _LOADED_AT timestamp_tz`.
+- **Why:** in a multi-column `ADD COLUMN`, Snowflake applies `IF NOT EXISTS` to the first column only. On the second run the first column was skipped and the second raised an error.
+- **Fix:** one `ALTER TABLE ... ADD COLUMN IF NOT EXISTS` statement per column.
+- **Lesson:** "runs once" is not "idempotent". The bug only appears on the second run, which is why the loader is always tested by running it twice.

@@ -210,7 +210,10 @@ def load_snowflake(files: list[LandingFile]) -> dict[str, int]:
                                             ignore_case => true)))
                 enable_schema_evolution = true"""
         )
-        cur.execute(f"alter table {table} add column if not exists _SOURCE_FILE varchar, _LOADED_AT timestamp_tz")
+        # one statement per column: in a multi-column ADD, IF NOT EXISTS only
+        # guards the first column, so the second run would fail on the second
+        cur.execute(f"alter table {table} add column if not exists _SOURCE_FILE varchar")
+        cur.execute(f"alter table {table} add column if not exists _LOADED_AT timestamp_tz")
         if mode == "replace":
             cur.execute(f"truncate table {table}")
         # COPY keeps 64 days of load history per table, so a file that was
