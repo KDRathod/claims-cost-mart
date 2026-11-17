@@ -1,0 +1,87 @@
+version: 2
+
+models:
+  - name: stg_claims
+    description: One row per claim header (latest delivery wins).
+    columns:
+      - name: claim_id
+        data_tests: [unique, not_null]
+      - name: member_id
+        data_tests:
+          - not_null
+          - relationships:
+              arguments: {to: ref('stg_members'), field: member_id}
+      - name: payer_id
+        data_tests:
+          - relationships:
+              arguments: {to: ref('stg_payers'), field: payer_id}
+      - name: service_date
+        data_tests: [not_null]
+      - name: claim_type
+        data_tests:
+          - accepted_values:
+              arguments: {values: [professional, institutional]}
+      - name: service_category
+        data_tests:
+          - accepted_values:
+              arguments: {values: [facility_stay, emergency_urgent, outpatient, primary_preventive]}
+      - name: billed_amount
+        data_tests:
+          - dbt_utils.accepted_range:
+              arguments: {min_value: 0}
+
+  - name: stg_claim_lines
+    description: One row per claim service line.
+    columns:
+      - name: claim_line_id
+        data_tests: [unique, not_null]
+      - name: claim_id
+        data_tests:
+          - relationships:
+              arguments: {to: ref('stg_claims'), field: claim_id}
+
+  - name: stg_claim_events
+    description: >
+      Typed claim ledger rows exactly as delivered. May contain redelivered
+      duplicates: use fct_claim_events for anything that sums money.
+    columns:
+      - name: event_id
+        data_tests: [not_null]
+      - name: event_type
+        data_tests:
+          - accepted_values:
+              arguments: {values: [SUBMITTED, PAID, DENIED, ADJUSTED, REVERSED]}
+      - name: posted_date
+        data_tests: [not_null]
+
+  - name: stg_members
+    description: Member extract including direct identifiers. Do not query from BI tools.
+    columns:
+      - name: member_id
+        data_tests: [unique, not_null]
+
+  - name: stg_enrollment
+    description: Coverage spans per member and payer.
+    columns:
+      - name: enrollment_span_id
+        data_tests: [unique, not_null]
+      - name: member_id
+        data_tests:
+          - relationships:
+              arguments: {to: ref('stg_members'), field: member_id}
+
+  - name: stg_providers
+    description: Latest provider extract.
+    columns:
+      - name: provider_id
+        data_tests: [unique, not_null]
+      - name: network_status
+        data_tests:
+          - accepted_values:
+              arguments: {values: [in_network, out_of_network]}
+
+  - name: stg_payers
+    description: Payer reference data.
+    columns:
+      - name: payer_id
+        data_tests: [unique, not_null]

@@ -1,0 +1,16 @@
+snapshots:
+  - name: snap_providers
+    description: >
+      Type 2 history of provider network status. The source sends only the
+      current state, so this snapshot is the ONLY record of what a provider's
+      status was in the past. A snapshot cannot recover history it never saw:
+      if the job does not run between two changes, the middle state is lost.
+    relation: ref('stg_providers')
+    config:
+      unique_key: provider_id
+      strategy: check
+      check_cols: [network_status, network_tier, provider_name, organization_name]
+      # valid_from is the business date of the extract, not the wall-clock
+      # time dbt happened to run. That keeps backfilled history correct.
+      updated_at: extract_date
+      hard_deletes: invalidate

@@ -1,0 +1,4 @@
+packages:
+  # pinned to a tag so builds are repeatable
+  - git: "https://github.com/dbt-labs/dbt-utils.git"
+    revision: 1.4.1

@@ -1,0 +1,46 @@
+name: claims_cost_mart
+version: "1.0.0"
+config-version: 2
+profile: claims_cost_mart
+require-dbt-version: [">=1.10.0", "<2.0.0"]
+
+model-paths: ["models"]
+snapshot-paths: ["snapshots"]
+macro-paths: ["macros"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+analysis-paths: ["analyses"]
+clean-targets: ["target", "dbt_packages"]
+
+vars:
+  # "Today" for the warehouse. Null means: use the latest posted_date in the
+  # data. Keeping this explicit makes every run reproducible and testable.
+  as_of_date: null
+  # A service month is "mature" (fully paid) once this many months have passed.
+  mature_after_months: 12
+  # Reprocess this many days behind the high-water mark on incremental runs.
+  incremental_lookback_days: 3
+
+models:
+  claims_cost_mart:
+    +persist_docs: {relation: true, columns: true}
+    staging:
+      +materialized: view
+      +schema: staging
+    intermediate:
+      +materialized: view
+      +schema: intermediate
+    marts:
+      +materialized: table
+      +schema: marts
+    restricted:
+      +materialized: table
+      +schema: restricted
+
+snapshots:
+  claims_cost_mart:
+    +target_schema: snapshots
+
+data_tests:
+  +store_failures: true
+  +schema: test_failures

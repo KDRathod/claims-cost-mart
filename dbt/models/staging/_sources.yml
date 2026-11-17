@@ -1,0 +1,34 @@
+version: 2
+
+sources:
+  - name: raw
+    description: >
+      Append-only landing tables written by ingestion/load_raw.py. Nothing is
+      cleaned here. Every row carries _source_file and _loaded_at.
+    schema: raw
+    loaded_at_field: _loaded_at
+    freshness:
+      warn_after: {count: 2, period: day}
+      error_after: {count: 5, period: day}
+    tables:
+      - name: claims
+        description: Claim headers, delivered on the day the claim is submitted.
+      - name: claim_lines
+        description: Service lines for each claim, delivered with the header.
+      - name: claim_events
+        description: >
+          Financial ledger for claims. Each row is a delta (not a running
+          total), so current state is the sum of a claim's events. The feed
+          redelivers rows now and then, so event_id is NOT unique here.
+      - name: members
+        description: Full member extract, replaced on every load. Contains direct identifiers.
+        freshness: null
+      - name: enrollment
+        description: Coverage spans per member and payer. Full extract.
+        freshness: null
+      - name: providers
+        description: Latest full provider extract. History is captured by the snap_providers snapshot.
+        freshness: null
+      - name: payers
+        description: Payer reference data.
+        freshness: null
