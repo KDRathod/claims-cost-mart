@@ -28,3 +28,10 @@ production lesson.
 - **What happened:** found by the day-by-day replay. The staging model selected `adjudication_system`, a column the feed only gained in July 2025. Replaying from 2023, the raw table did not have the column yet and staging failed.
 - **Fix:** `column_or_null()` macro checks the real table at compile time and falls back to a typed NULL.
 - **Lesson:** schema drift cuts both ways. Handling a new column in the loader is not enough if the transform assumes the column always existed. The one-shot build never showed this; only replaying history did.
+
+## 6. `250001: Failed to login: Authentication failed. UnexpectedError`
+- **What happened:** the first Snowflake run in GitHub Actions failed at login with a vague error. Snowflake's own login history showed no attempt for the service user at all.
+- **Why:** the `SNOWFLAKE_PRIVATE_KEY` secret did not contain the key. It was a single line, not the multi-line PEM file, so the driver had nothing valid to sign with and never got as far as naming a user.
+- **How it was found:** secrets cannot be read back, so the login check now parses the key file first and prints two safe facts: how many lines it has and whether the first line is a key header. It also prints the public-key fingerprint, which can be compared to `RSA_PUBLIC_KEY_FP` in `DESC USER`.
+- **Fix:** paste the whole `.p8` file into the secret again, BEGIN and END lines included.
+- **Lesson:** fail fast and say why. A pipeline should check its own credentials before doing work, and diagnose them without ever printing the secret.
